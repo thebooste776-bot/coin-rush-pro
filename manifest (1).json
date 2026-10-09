@@ -1,0 +1,11 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "COIN RUSH PRO",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "COIN RUSH",
+  "start_url": "/",
+  "theme_color": "#ffffff"
+}
