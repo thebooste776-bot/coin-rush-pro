@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>COIN RUSH PRO</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#080d1c;color:white;
+ font-family:Arial;text-align:center;touch-action:none;
+}
+h1{color:#ffd43b;margin:12px 0}
+#stats{
+ display:flex;justify-content:space-around;
+ background:#151f38;padding:12px 2px;font-size:14px;
+}
+canvas{
+ display:block;width:min(96vw,400px);
+ height:auto;margin:10px auto;
+ border:2px solid #42577f;border-radius:12px;
+ background:#101d32;
+}
+#controls{
+ display:flex;justify-content:space-around;
+ align-items:center;margin:12px auto;max-width:400px;
+}
+#joy{
+ width:130px;height:130px;border-radius:50%;
+ background:#ffffff18;border:3px solid #7284a8;
+ position:relative;touch-action:none;
+}
+#stick{
+ width:48px;height:48px;border-radius:50%;
+ position:absolute;left:38px;top:38px;
+ background:#ffd43b;pointer-events:none;
+}
+button{
+ border:0;border-radius:10px;padding:12px 15px;
+ margin:4px;background:#ffd43b;color:#111;
+ font-weight:bold;font-size:14px;
+}
+#menu{
+ position:fixed;inset:0;background:#050a16ee;
+ display:flex;align-items:center;justify-content:center;
+ flex-direction:column;padding:20px;z-index:5;
+}
+#menu h1{font-size:32px}
+#menu p{max-width:300px;line-height:1.6}
+.hide{display:none!important}
+#hint{color:#b8c9eb;font-size:12px}
+</style>
+</head>
+
+<body>
+
+<h1>🪙 COIN RUSH PRO</h1>
+
+<div id="stats">
+ <span>🪙 <b id="score">0</b></span>
+ <span>❤️ <b id="lives">3</b></span>
+ <span>⭐ <b id="level">1</b></span>
+</div>
+
+<canvas id="game" width="400" height="450"></canvas>
+
+<div id="controls">
+ <div id="joy"><div id="stick"></div></div>
+ <div>
+  <button id="pause">⏸ PAUSE</button><br>
+  <button id="sound">🔊 SOUND ON</button><br>
+  <button id="map">🗺️ CHANGE MAP</button>
+ </div>
+</div>
+
+<p id="hint">Joystick हलवून कॉइन्स गोळा कर आणि शत्रूंपासून वाच!</p>
+
+<div id="menu">
+ <h1 id="title">COIN RUSH PRO</h1>
+ <p id="description">
+   🪙 Coins गोळा कर!<br>
+   👾 Enemies पासून वाच!<br>
+   ⚡ Power-ups घे!<br>
+   🎯 प्रत्येक 5 Coins नंतर नवीन Level!
+ </p>
+ <p id="best">🏆 Best Score: 0</p>
+ <button id="start">▶ START GAME</button>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const $=id=>document.getElementById(id);
+
+let player,coin,enemies,powers;
+let score=0,lives=3,level=1,coins=0;
+let running=false,paused=false,gameEnded=false;
+let dx=0,dy=0,joyActive=false;
+let invincible=0,powerTime=0;
+let elapsed=0,last=0,powerClock=0;
+let mapIndex=0,soundOn=true,audio=null;
+
+const maps=[
+ {bg:"#101d32",grid:"#233552",name:"NIGHT CITY"},
+ {bg:"#173126",grid:"#28523c",name:"GREEN FOREST"},
+ {bg:"#302018",grid:"#573b29",name:"DESERT"}
+];
+
+let high=Number(localStorage.getItem("crHigh")||0);
+
+function randomPos(){
+ return {x:25+Math.random()*350,y:25+Math.random()*400};
+}
+
+function newEnemy(type){
+ let p=randomPos();
+ return {
+  x:p.x,y:p.y,r:type===2?16:12,
+  type:type,
+  speed:(type===0?65:type===1?90:48)+level*5
+ };
+}
+
+function newPower(){
+ let p=randomPos();
+ return {x:p.x,y:p.y,type:Math.random()<0.5?"shield":"bonus"};
+}
+
+function startGame(){
+ score=0;lives=3;level=1;coins=0;
+ elapsed=0;powerClock=0;powerTime=0;invincible=2;
+ player={x:200,y:225,r:12,speed:175};
+ coin=randomPos();
+ enemies=[newEnemy(0)];
+ powers=[];
+ running=true;paused=false;gameEnded=false;
+ $("menu").classList.add("hide");
+ $("pause").textContent="⏸ PAUSE";
+ updateStats();
+}
+
+function updateStats(){
+ $("score").textContent=score;
+ $("lives").textContent=lives;
+ $("level").textContent=level;
+ $("best").textContent="🏆 Best Score: "+high;
+}
+
+function circle(x,y,r,color){
+ ctx.beginPath();
+ ctx.arc(x,y,r,0,Math.PI*2);
+ ctx.fillStyle=color;
+ ctx.fill();
+}
+
+function draw(){
+ const m=maps[mapIndex];
+ ctx.fillStyle=m.bg;
+ ctx.fillRect(0,0,400,450);
+
+ ctx.strokeStyle=m.grid;
+ ctx.lineWidth=1;
+ for(let x=0;x<400;x+=32){
+  ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,450);ctx.stroke();
+ }
+ for(let y=0;y<450;y+=32){
+  ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(400,y);ctx.stroke();
+ }
+
+ if(!player)return;
+
+ // Coin
+ circle(coin.x,coin.y,12,"#ffbb22");
+ circle(coin.x,coin.y,6,"#fff1a3");
+
+ // Power-ups
+ powers.forEach(p=>{
+  circle(p.x,p.y,13,p.type==="shield"?"#27e9ff":"#bd67ff");
+  ctx.fillStyle="white";
+  ctx.font="bold 12px Arial";
+  ctx.textAlign="center";
+  ctx.fillText(p.type==="shield"?"S":"+ ",p.x,p.y+4);
+ });
+
+ // Enemies
+ enemies.forEach(e=>{
+  circle(e.x,e.y,e.r,e.type===0?"#ff4059":e.type===1?"#ff8b35":"#d451ff");
+  circle(e.x-3,e.y-3,3,"white");
+ });
+
+ // Player
+ if(invincible>0 && Math.floor(invincible*8)%2===0){
+  circle(player.x,player.y,player.r+7,"#ffffff55");
+ }
+ circle(player.x,player.y,player.r,"#39dfff");
+ circle(player.x-3,player.y-3,3,"white");
+
+ ctx.fillStyle="white";
+ ctx.font="12px Arial";
+ ctx.textAlign="left";
+ ctx.fillText(m.name,8,16);
+
+ if(powerTime>0){
+  ctx.fillStyle="#5effc2";
+  ctx.fillText("SHIELD: "+Math.ceil(powerTime)+"s",8,32);
+ }
+}
+
+function distance(a,b){
+ return Math.hypot(a.x-b.x,a.y-b.y);
+}
+
+function playSound(freq=600){
+ if(!soundOn)return;
+ try{
+  audio=audio||new (window.AudioContext||window.webkitAudioContext)();
+  if(audio.state==="suspended")audio.resume();
+  const osc=audio.createOscillator();
+  const gain=audio.createGain();
+  osc.frequency.value=freq;
+  gain.gain.value=0.06;
+  osc.connect(gain);gain.connect(audio.destination);
+  osc.start();
+  gain.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+0.12);
+  osc.stop(audio.currentTime+0.12);
+ }catch(e){}
+}
+
+function update(dt){
+ if(!running||paused||gameEnded)return;
+
+ elapsed+=dt;
+ invincible=Math.max(0,invincible-dt);
+ powerTime=Math.max(0,powerTime-dt);
+
+ player.x+=dx*player.speed*dt;
+ player.y+=dy*player.speed*dt;
+ player.x=Math.max(player.r,Math.min(400-player.r,player.x));
+ player.y=Math.max(player.r,Math.min(450-player.r,player.y));
+
+ // Collect coin
+ if(distance(player,coin)<player.r+12){
+  score+=10;
+  coins++;
+  playSound(750);
+  coin=randomPos();
+
+  if(coins%5===0){
+   level++;
+   enemies.push(newEnemy(coins%10===0?1:0));
+   if(level%3===0)enemies.push(newEnemy(2));
+   player.speed+=3;
+  }
+
+  updateStats();
+ }
+
+ // Spawn power-ups
+ powerClock+=dt;
+ if(powerClock>9){
+  powerClock=0;
+  if(powers.length<3)powers.push(newPower());
+ }
+
+ powers=powers.filter(p=>{
+  if(distance(player,p)<player.r+14){
+   if(p.type==="shield"){
+    powerTime=6;
+    invincible=6;
+   }else{
+    score+=25;
+   }
+   playSound(950);
+   updateStats();
+   return false;
+  }
+  return true;
+ });
+
+ // Enemy chase
+ for(const e of enemies){
+  let d=distance(player,e)||1;
+  let speed=e.speed;
+
+  // Bonus shield slows enemies
+  if(powerTime>0)speed*=0.65;
+
+  e.x+=(player.x-e.x)/d*speed*dt;
+  e.y+=(player.y-e.y)/d*speed*dt;
+
+  if(d<player.r+e.r && invincible<=0){
+   lives--;
+   invincible=2;
+   player.x=200;player.y=225;
+   playSound(180);
+   updateStats();
+   if(lives<=0)endGame();
+   break;
+  }
+ }
+}
+
+function endGame(){
+ running=false;gameEnded=true;
+ dx=0;dy=0;
+ if(score>high){
+  high=score;
+  localStorage.setItem("crHigh",high);
+ }
+ $("title").textContent="💀 GAME OVER";
+ $("description").innerHTML=
+  "तुझा Score: "+score+"<br>Level: "+level+
+  "<br>🏆 Best Score: "+high+
+  "<br>🎯 Mission: "+coins+" Coins गोळा केले!";
+ $("start").textContent="🔄 PLAY AGAIN";
+ $("menu").classList.remove("hide");
+ updateStats();
+}
+
+function loop(time){
+ let dt=Math.min((time-last)/1000||0,0.035);
+ last=time;
+ update(dt);
+ draw();
+ requestAnimationFrame(loop);
+}
+
+// Joystick controls
+const joy=$("joy"),stick=$("stick");
+
+function moveJoy(e){
+ const r=joy.getBoundingClientRect();
+ let x=e.clientX-(r.left+r.width/2);
+ let y=e.clientY-(r.top+r.height/2);
+ const max=38;
+ let len=Math.hypot(x,y)||1;
+ if(len>max){x=x/len*max;y=y/len*max;}
+ stick.style.left=(38+x)+"px";
+ stick.style.top=(38+y)+"px";
+ dx=x/max;dy=y/max;
+ let d=Math.hypot(dx,dy);
+ if(d>1){dx/=d;dy/=d;}
+}
+
+function releaseJoy(){
+ joyActive=false;dx=0;dy=0;
+ stick.style.left="38px";
+ stick.style.top="38px";
+}
+
+joy.addEventListener("pointerdown",e=>{
+ joyActive=true;
+ joy.setPointerCapture(e.pointerId);
+ moveJoy(e);
+});
+joy.addEventListener("pointermove",e=>{
+ if(joyActive)moveJoy(e);
+});
+joy.addEventListener("pointerup",releaseJoy);
+joy.addEventListener("pointercancel",releaseJoy);
+
+$("start").addEventListener("click",startGame);
+
+$("pause").addEventListener("click",()=>{
+ if(!running)return;
+ paused=!paused;
+ $("pause").textContent=paused?"▶ RESUME":"⏸ PAUSE";
+});
+
+$("sound").addEventListener("click",()=>{
+ soundOn=!soundOn;
+ $("sound").textContent=soundOn?"🔊 SOUND ON":"🔇 SOUND OFF";
+ if(soundOn)playSound();
+});
+
+$("map").addEventListener("click",()=>{
+ mapIndex=(mapIndex+1)%maps.length;
+ playSound(500);
+});
+
+updateStats();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>nano index.html
